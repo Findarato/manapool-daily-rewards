@@ -217,14 +217,21 @@ scrape_configs:
 The exporter is a thin conversion over the JSON, available standalone as
 `manapool-metrics [payload.json]` (reads stdin when no path is given).
 
-### Scheduled runs (GitHub Actions)
+### GitHub Actions
 
-`.github/workflows/daily-reward.yml` builds the container image and publishes
-it to the GitHub Container Registry (`ghcr.io/<owner>/<repo>:latest`, plus a
-`sha-…` tag) on every push to `main`, on a daily schedule at 01:00 UTC, and
-on manual dispatch. The image itself does the daily claiming, so the
-credentials are only needed at runtime (`docker run -e ...`), not as
-repository secrets.
+Three workflows ship with the repo:
+
+- `.github/workflows/ci.yml` - lint, format check, type check, tests +
+  coverage, on every push to `main` and every pull request.
+- `.github/workflows/daily-reward.yml` - claims the reward at 01:00 UTC using
+  the `MANAPOOL_ACCOUNT_USERNAME` / `MANAPOOL_ACCOUNT_PASSWORD` repository
+  secrets (useful without the container); `workflow_dispatch` reruns it.
+- `.github/workflows/docker.yml` - builds and publishes the image to the
+  GitHub Container Registry (`ghcr.io/<owner>/<repo>:latest`, plus a `sha-…`
+  tag). It runs only after the **CI** workflow succeeds on `main` (pull
+  requests never push an image) and can also be dispatched manually from the
+  Actions tab. The image can claim the reward on its own, so credentials are
+  then only needed at runtime (`docker run -e ...`).
 
 ### Exit codes
 
