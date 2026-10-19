@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 
+from prometheus_client.metrics_core import Metric
+from prometheus_client.parser import text_string_to_metric_families
+
 from manapool.models import ClaimResult, Status
 from manapool.presentation import (
     claim_to_dict,
@@ -101,11 +104,17 @@ def test_render_json_round_trips():
     assert json.loads(render_json(payload)) == payload
 
 
-def _samples(text: str) -> dict[str, str]:
+def _families(text: str) -> dict[str, Metric]:
+    # Parsed with the official client library so the exposition format itself
+    # is validated, not just the substrings we happen to assert on.
+    return {family.name: family for family in text_string_to_metric_families(text)}
+
+
+def _samples(text: str) -> dict[str, float]:
     return {
-        line.split(" ")[0]: line.split(" ", 1)[1]
-        for line in text.splitlines()
-        if line and not line.startswith("#")
+        sample.name: sample.value
+        for family in _families(text).values()
+        for sample in family.samples
     }
 
 
@@ -128,25 +137,28 @@ def test_prometheus_metrics_for_claim():
         },
     }
     text = payload_to_prometheus(payload)
+    families = _families(text)
     samples = _samples(text)
 
-    assert samples["manapool_error"] == "0"
-    assert samples["manapool_eligible"] == "1"
-    assert samples["manapool_already_claimed"] == "0"
-    assert samples["manapool_extra_mana_available"] == "16"
-    assert samples["manapool_pending_extra_mana"] == "1396"
-    assert samples["manapool_seconds_until_reset"] == "21238"
-    assert samples["manapool_claimed"] == "1"
-    assert samples["manapool_claim_award_amount"] == "10"
-    assert samples["manapool_status_after_extra_mana_available"] == "26"
-    assert "# TYPE manapool_claimed gauge" in text
+    assert samples == {
+        "manapool_error": 0.0,
+        "manapool_eligible": 1.0,
+        "manapool_already_claimed": 0.0,
+        "manapool_extra_mana_available": 16.0,
+        "manapool_pending_extra_mana": 1396.0,
+        "manapool_seconds_until_reset": 21238.0,
+        "manapool_claimed": 1.0,
+        "manapool_claim_award_amount": 10.0,
+        "manapool_status_after_extra_mana_available": 26.0,
+    }
+    assert all(family.type == "gauge" for family in families.values())
+    assert all(family.documentation for family in families.values())
 
 
 def test_prometheus_error_payload_has_no_status_metrics():
-    text = payload_to_prometheus({"error": "sign-in failed"})
-    samples = _samples(text)
+    samples = _samples(payload_to_prometheus({"error": "sign-in failed"}))
 
-    assert samples == {"manapool_error": "1", "manapool_claimed": "0"}
+    assert samples == {"manapool_error": 1.0, "manapool_claimed": 0.0}
 
 
 def test_prometheus_omits_missing_values():
@@ -159,9 +171,9 @@ def test_prometheus_omits_missing_values():
         },
         "claimed": False,
     }
-    text = payload_to_prometheus(payload)
+    samples = _samples(payload_to_prometheus(payload))
 
-    assert "manapool_extra_mana_available" not in text
-    assert "manapool_pending_extra_mana" not in text
-    assert "manapool_claim_award_amount" not in text
-    assert "manapool_seconds_until_reset 0" in text
+    assert "manapool_extra_mana_available" not in samples
+    assert "manapool_pending_extra_mana" not in samples
+    assert "manapool_claim_award_amount" not in samples
+    assert samples["manapool_seconds_until_reset"] == 0.0

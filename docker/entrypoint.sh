@@ -11,14 +11,15 @@ RUN_AT_UTC="${RUN_AT_UTC:-01:00}"
 
 mkdir -p "$WEB_ROOT"
 
-# Answer immediately, before the first run finishes.
+# Answer immediately, before the first run finishes. Both placeholders go
+# through the same rendering path as a real run, so the served bodies are
+# always valid JSON / Prometheus exposition.
 if [[ ! -f "$WEB_ROOT/index.html" ]]; then
     printf '%s\n' '{"status":"pending","message":"first run has not completed yet"}' \
         > "$WEB_ROOT/index.html"
 fi
 if [[ ! -f "$WEB_ROOT/metrics" ]]; then
-    printf '%s\n' '# placeholder until the first run completes' 'manapool_error 1' \
-        > "$WEB_ROOT/metrics"
+    manapool-metrics "$WEB_ROOT/index.html" > "$WEB_ROOT/metrics"
 fi
 
 write_metrics() {

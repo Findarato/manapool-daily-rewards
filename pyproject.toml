@@ -24,6 +24,7 @@ packages = ["src/manapool"]
 dev = [
     "diff-cover>=10.3.0",
     "mypy>=1.11",
+    "prometheus-client>=0.26.0",
     "pytest>=8",
     "pytest-cov>=7.1.0",
     "ruff>=0.10",
