@@ -226,12 +226,13 @@ Three workflows ship with the repo:
 - `.github/workflows/daily-reward.yml` - claims the reward at 01:00 UTC using
   the `MANAPOOL_ACCOUNT_USERNAME` / `MANAPOOL_ACCOUNT_PASSWORD` repository
   secrets (useful without the container); `workflow_dispatch` reruns it.
-- `.github/workflows/docker.yml` - builds and publishes the image to the
-  GitHub Container Registry (`ghcr.io/<owner>/<repo>:latest`, plus a `sha-…`
-  tag). It runs only after the **CI** workflow succeeds on `main` (pull
-  requests never push an image) and can also be dispatched manually from the
-  Actions tab. The image can claim the reward on its own, so credentials are
-  then only needed at runtime (`docker run -e ...`).
+- `.github/workflows/docker.yml` - builds the image on every pull request
+  **without pushing** (required before a PR can merge), and publishes it to
+  the GitHub Container Registry (`ghcr.io/<owner>/<repo>:latest`, plus a
+  `sha-…` tag) only after the **CI** workflow succeeds on `main`; it can also
+  be dispatched manually from the Actions tab. The image can claim the reward
+  on its own, so credentials are then only needed at runtime
+  (`docker run -e ...`).
 
 ### Exit codes
 

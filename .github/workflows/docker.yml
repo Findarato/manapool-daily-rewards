@@ -1,18 +1,39 @@
 name: Container
 
-# Publishes the image only after the CI workflow (lint, format, type check,
-# tests + coverage) has passed on main. Pull requests never push an image.
+# Builds the image on every pull request without pushing (required to merge),
+# and publishes it only after the CI workflow (lint, format, type check, tests
+# + coverage) has passed on main.
 on:
+  pull_request:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
   workflow_dispatch:
 
 concurrency:
-  group: container
+  group: container-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  build:
+    name: Build image (no push)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: manapool-daily-rewards:pr-${{ github.event.pull_request.number }}
+
   publish:
     name: Build and publish image
     # A successful CI run on main, or an explicit manual dispatch.
