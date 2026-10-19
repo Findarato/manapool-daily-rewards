@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 
+from prometheus_client.metrics_core import Metric
+from prometheus_client.parser import text_string_to_metric_families
+
 from manapool.models import ClaimResult, Status
 from manapool.presentation import (
     claim_to_dict,
     format_duration,
     format_mana,
+    payload_to_prometheus,
     render_json,
     render_status,
     status_to_dict,
@@ -98,3 +102,78 @@ def test_claim_to_dict():
 def test_render_json_round_trips():
     payload = {"eligible": True, "amount": 16}
     assert json.loads(render_json(payload)) == payload
+
+
+def _families(text: str) -> dict[str, Metric]:
+    # Parsed with the official client library so the exposition format itself
+    # is validated, not just the substrings we happen to assert on.
+    return {family.name: family for family in text_string_to_metric_families(text)}
+
+
+def _samples(text: str) -> dict[str, float]:
+    return {
+        sample.name: sample.value
+        for family in _families(text).values()
+        for sample in family.samples
+    }
+
+
+def test_prometheus_metrics_for_claim():
+    payload = {
+        "status": {
+            "extra_mana_available": 16,
+            "eligible": True,
+            "already_claimed": False,
+            "seconds_until_reset": 21238,
+            "pending_extra_mana": 1396,
+        },
+        "claimed": True,
+        "claim": {"award_amount": 10, "award_title": "Daily"},
+        "status_after": {
+            "extra_mana_available": 26,
+            "eligible": True,
+            "already_claimed": True,
+            "seconds_until_reset": 21238,
+        },
+    }
+    text = payload_to_prometheus(payload)
+    families = _families(text)
+    samples = _samples(text)
+
+    assert samples == {
+        "manapool_error": 0.0,
+        "manapool_eligible": 1.0,
+        "manapool_already_claimed": 0.0,
+        "manapool_extra_mana_available": 16.0,
+        "manapool_pending_extra_mana": 1396.0,
+        "manapool_seconds_until_reset": 21238.0,
+        "manapool_claimed": 1.0,
+        "manapool_claim_award_amount": 10.0,
+        "manapool_status_after_extra_mana_available": 26.0,
+    }
+    assert all(family.type == "gauge" for family in families.values())
+    assert all(family.documentation for family in families.values())
+
+
+def test_prometheus_error_payload_has_no_status_metrics():
+    samples = _samples(payload_to_prometheus({"error": "sign-in failed"}))
+
+    assert samples == {"manapool_error": 1.0, "manapool_claimed": 0.0}
+
+
+def test_prometheus_omits_missing_values():
+    payload = {
+        "status": {
+            "extra_mana_available": None,
+            "eligible": False,
+            "already_claimed": False,
+            "seconds_until_reset": 0,
+        },
+        "claimed": False,
+    }
+    samples = _samples(payload_to_prometheus(payload))
+
+    assert "manapool_extra_mana_available" not in samples
+    assert "manapool_pending_extra_mana" not in samples
+    assert "manapool_claim_award_amount" not in samples
+    assert samples["manapool_seconds_until_reset"] == 0.0

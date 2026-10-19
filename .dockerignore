@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.vscode
+.cursorignore
+.env
+.env.*
+tests
+**/__pycache__
+*.pyc
+coverage.xml
+htmlcov
+Dockerfile
+.dockerignore

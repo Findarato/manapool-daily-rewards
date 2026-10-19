@@ -140,15 +140,99 @@ outcome (`claim` is `null` when nothing was claimed); `status_after` is a
 fresh snapshot taken after a successful claim (`null` otherwise);
 `pending_extra_mana` is omitted when the site reports none.
 
-### Scheduled runs (GitHub Actions)
+### Docker
 
-`.github/workflows/daily-reward.yml` runs `manapool` daily at 01:00 UTC
-(9 PM EDT / 8 PM EST). To enable it on your fork, add two repository secrets:
+The container runs the claim in a loop and publishes the latest result over
+HTTP. nginx serves the JSON at `/` (`index.html`) and the same result as
+Prometheus text metrics at `/metrics`, on **port 80**, refreshed on container
+start and then every day at **01:00 UTC** (files are replaced atomically, so
+the server always has a complete copy):
 
-- `MANAPOOL_ACCOUNT_USERNAME`
-- `MANAPOOL_ACCOUNT_PASSWORD`
+```bash
+docker build -t manapool-daily-rewards .
+docker run -d -p 80:80 \
+  -e MANAPOOL_ACCOUNT_USERNAME \
+  -e MANAPOOL_ACCOUNT_PASSWORD \
+  manapool-daily-rewards
 
-You can also trigger the workflow manually from the Actions tab.
+curl http://localhost/
+```
+
+Published images (built by the workflow below):
+
+```bash
+docker run -d -p 80:80 \
+  -e MANAPOOL_ACCOUNT_USERNAME \
+  -e MANAPOOL_ACCOUNT_PASSWORD \
+  ghcr.io/findarato/manapool-daily-rewards:latest
+```
+
+The refresh time can be overridden with `RUN_AT_UTC` (e.g. `-e RUN_AT_UTC=02:30`).
+
+#### Prometheus metrics
+
+The result is always published as Prometheus text metrics at `/metrics`,
+refreshed together with `index.html`:
+
+```bash
+docker run -d -p 80:80 \
+  -e MANAPOOL_ACCOUNT_USERNAME \
+  -e MANAPOOL_ACCOUNT_PASSWORD \
+  manapool-daily-rewards
+
+curl http://localhost/metrics
+```
+
+```text
+# HELP manapool_error 1 when the last run failed, otherwise 0.
+# TYPE manapool_error gauge
+manapool_error 0
+# HELP manapool_eligible 1 when a recent order makes the account eligible.
+# TYPE manapool_eligible gauge
+manapool_eligible 1
+# HELP manapool_already_claimed 1 when today's reward was already claimed before the run.
+# TYPE manapool_already_claimed gauge
+manapool_already_claimed 0
+# HELP manapool_extra_mana_available Extra Mana currently available.
+# TYPE manapool_extra_mana_available gauge
+manapool_extra_mana_available 16
+# HELP manapool_claimed 1 when this run claimed the reward, otherwise 0.
+# TYPE manapool_claimed gauge
+manapool_claimed 1
+```
+
+Exposed series: `manapool_error`, `manapool_eligible`, `manapool_already_claimed`,
+`manapool_extra_mana_available`, `manapool_pending_extra_mana`,
+`manapool_seconds_until_reset`, `manapool_claimed`, `manapool_claim_award_amount`,
+and `manapool_status_after_extra_mana_available` (the last three only when the
+value is known). Point a scrape job at the container to collect them:
+
+```yaml
+scrape_configs:
+  - job_name: manapool
+    static_configs:
+      - targets: ["manapool:80"]
+```
+
+The exporter is a thin conversion over the JSON, available standalone as
+`manapool-metrics [payload.json]` (reads stdin when no path is given).
+
+### GitHub Actions
+
+Three workflows ship with the repo:
+
+- `.github/workflows/ci.yml` - lint, format check, type check, tests +
+  coverage, on every push to `main` and every pull request.
+- `.github/workflows/daily-reward.yml` - claims the reward at 01:00 UTC using
+  the `MANAPOOL_ACCOUNT_USERNAME` / `MANAPOOL_ACCOUNT_PASSWORD` repository
+  secrets (useful without the container); `workflow_dispatch` reruns it.
+- `.github/workflows/docker.yml` - builds the image on every pull request
+  **without pushing** (required before a PR can merge), and publishes it to
+  the GitHub Container Registry (`ghcr.io/<owner>/<repo>:latest`, plus a
+  `sha-…` tag) only after the **CI** workflow succeeds on `main`; it can also
+  be dispatched manually from the Actions tab. The image can claim the reward
+  on its own, so credentials are then only needed at runtime
+  (`docker run -e ...`).
 
 ### Exit codes
 
@@ -171,7 +255,8 @@ The code is split by domain under `src/manapool/`:
 - `transport.py` - the `Transport` protocol and the `requests`-backed implementation.
 - `auth/` - SvelteKit sign-in and Supabase session reconstruction.
 - `parsing/` - SvelteKit `devalue` decoding and nested-structure search.
-- `presentation.py` - pure status formatting and JSON serialization.
+- `presentation.py` - pure status formatting, JSON serialization, and Prometheus metrics.
+- `exporter.py` - `manapool-metrics`, converting a JSON payload to Prometheus text.
 - `config.py`, `console.py`, `models.py`, `errors.py` - settings/credentials, output, domain models, exceptions.
 
 Network access and I/O are injected (`Transport`, `Console`), so the tests run
